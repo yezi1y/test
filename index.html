@@ -1,0 +1,508 @@
+
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1.0">
+
+    <title>成绩计算器</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: system-ui, sans-serif;
+            font-size: 16px;
+            background: #edf2f7;
+            color: #23374d;
+            margin: 0;
+            padding: 24px 12px;
+        }
+
+        main {
+            max-width: 680px;
+            margin: auto;
+            background: white;
+            border-radius: 24px;
+            padding: 24px;
+            box-shadow: 0 8px 40px #243b5510;
+        }
+
+        h1 {
+            font-size: 26px;
+            margin: 0;
+        }
+
+        small {
+            color: #66788a;
+        }
+
+        .hero {
+            background: #e8eff7;
+            border-radius: 16px;
+            padding: 22px;
+            text-align: center;
+            margin: 24px 0;
+        }
+
+        .big {
+            font-size: 48px;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .line {
+            display: grid;
+            grid-template-columns: 2fr 1fr 1fr 34px;
+            gap: 8px;
+            margin: 10px 0;
+            align-items: center;
+        }
+
+        input,
+        select,
+        button {
+            font: inherit;
+            border: 1px solid #ccd7e2;
+            border-radius: 9px;
+            padding: 10px;
+            min-width: 0;
+            width: 100%;
+            background: white;
+            color: inherit;
+        }
+
+        button {
+            cursor: pointer;
+            background: #e8eff7;
+        }
+
+        button.primary {
+            background: #345b83;
+            color: white;
+            border: 0;
+        }
+
+        .actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .actions button {
+            flex: 1;
+            min-width: 100px;
+        }
+
+        hr {
+            border: 0;
+            border-top: 1px solid #e1e7ee;
+            margin: 24px 0;
+        }
+
+        label {
+            display: block;
+            margin: 12px 0;
+        }
+
+        label input,
+        label select {
+            margin-top: 6px;
+        }
+
+        footer {
+            margin-top: 20px;
+            font-size: 12px;
+            color: #66788a;
+        }
+    </style>
+</head>
+
+<body>
+
+<main>
+    <h1>成绩计算器</h1>
+
+    <small>
+        GRADE CALCULATOR · 自定义加权成绩
+    </small>
+
+    <label>
+        课程名称
+        <input id="course" value="毛概">
+    </label>
+
+    <div class="hero">
+        <small>预计总评 / 100</small>
+        <div class="big" id="total">—</div>
+        <div id="status"></div>
+    </div>
+
+    <div class="line">
+        <small>考核项目</small>
+        <small>占比 %</small>
+        <small>成绩 / 100</small>
+        <span></span>
+    </div>
+
+    <div id="rows"></div>
+
+    <div class="actions">
+        <button id="add">＋ 添加项目</button>
+        <button id="reset">重置</button>
+    </div>
+
+    <hr>
+
+    <h2>目标成绩反推</h2>
+
+    <label>
+        目标总评
+
+        <input
+                id="target"
+                type="number"
+                min="0"
+                max="100"
+                step="any"
+                value="85"
+        >
+    </label>
+
+    <label>
+        待计算项目
+        <select id="pick"></select>
+    </label>
+
+    <div class="hero">
+        <small>最低所需成绩</small>
+        <div class="big" id="needed">—</div>
+        <div id="hint"></div>
+    </div>
+
+    <button class="primary" id="export">
+        导出 CSV 成绩记录
+    </button>
+
+    <footer>
+        所有计算在本地完成。
+        默认毛概数据中，平时及期末90分为预估值。
+        权重须合计100%。
+    </footer>
+</main>
+
+<script>
+    // 获取页面元素
+    const $ = id => document.getElementById(id);
+
+    let seq = 0;
+
+    // 添加考核项目
+    function add(name = '', w = '', s = '') {
+        const d = document.createElement('div');
+
+        d.className = 'line';
+        d.dataset.id = ++seq;
+
+        const values = [name, w, s];
+        const placeholders = [
+            '项目名称',
+            '占比',
+            '成绩'
+        ];
+
+        for (const [i, v] of values.entries()) {
+            const x = document.createElement('input');
+
+            x.type = i ? 'number' : 'text';
+            x.value = v;
+            x.placeholder = placeholders[i];
+
+            x.setAttribute(
+                'aria-label',
+                x.placeholder
+            );
+
+            if (i) {
+                x.min = 0;
+                x.max = 100;
+                x.step = 'any';
+            }
+
+            x.oninput = calc;
+
+            d.append(x);
+        }
+
+        // 删除项目按钮
+        const b = document.createElement('button');
+
+        b.textContent = '×';
+
+        b.setAttribute(
+            'aria-label',
+            '删除项目'
+        );
+
+        b.onclick = () => {
+            d.remove();
+            calc();
+        };
+
+        d.append(b);
+
+        $('rows').append(d);
+
+        calc();
+    }
+
+    // 获取所有考核项目的数据
+    function data() {
+        return [...$('rows').children].map(d => {
+            const [n, w, s] =
+                d.querySelectorAll('input');
+
+            return {
+                id: d.dataset.id,
+                n: n.value,
+                w: Number(w.value),
+                s: Number(s.value),
+
+                valid:
+                    w.value !== '' &&
+                    s.value !== '' &&
+                    w.validity.valid &&
+                    s.validity.valid
+            };
+        });
+    }
+
+    // 计算总评及目标成绩
+    function calc() {
+        const a = data();
+
+        // 计算权重合计
+        const w = a.reduce(
+            (t, x) => t + x.w,
+            0
+        );
+
+        // 检查输入是否有效
+        const ok =
+            a.length &&
+            a.every(x => x.valid) &&
+            Math.abs(w - 100) < 1e-7;
+
+        // 加权计算总成绩
+        const t = a.reduce(
+            (t, x) => t + x.w * x.s / 100,
+            0
+        );
+
+        $('total').textContent =
+            ok ? t.toFixed(2) : '—';
+
+        $('status').textContent =
+            '权重合计 ' +
+            w.toFixed(2) +
+            '%' +
+            (ok ? '' : ' · 请检查输入');
+
+        $('status').className =
+            ok ? '' : 'error';
+
+        // 更新待计算项目列表
+        const old = $('pick').value;
+
+        $('pick').replaceChildren(
+            ...a.map(x =>
+                new Option(
+                    x.n || '未命名项目',
+                    x.id
+                )
+            )
+        );
+
+        if (a.some(x => x.id === old)) {
+            $('pick').value = old;
+        } else if (a.length) {
+            $('pick').value = a.at(-1).id;
+        }
+
+        // 获取待反推的考核项目
+        const p = a.find(
+            x => x.id === $('pick').value
+        );
+
+        const g = Number($('target').value);
+
+        // 反推达到目标总评所需的成绩
+        const need =
+            ok &&
+            p &&
+            p.w > 0 &&
+            $('target').value !== '' &&
+            g >= 0 &&
+            g <= 100
+
+                ? (g - t + p.w * p.s / 100)
+                * 100 / p.w
+
+                : null;
+
+        // 显示最低所需成绩
+        $('needed').textContent =
+            need === null
+
+                ? '—'
+
+                : Math.max(
+                    0,
+                    Math.ceil(need * 100 - 1e-8)
+                    / 100
+                ).toFixed(2);
+
+        // 显示计算提示
+        $('hint').textContent =
+            need === null
+
+                ? '请输入有效数据'
+
+                : need > 100 + 1e-8
+
+                    ? '当前条件下无法达到目标'
+
+                    : need <= 0
+
+                        ? '其他项目已足够'
+
+                        : '整数计分至少 ' +
+                        Math.ceil(need - 1e-8) +
+                        ' 分';
+
+        $('export').disabled = !ok;
+
+        return {
+            a,
+            t,
+            ok,
+            need
+        };
+    }
+
+    // 添加新项目
+    $('add').onclick = () => {
+        add('新项目', 0, 0);
+    };
+
+    // 重置计算器
+    $('reset').onclick = () => {
+        $('rows').replaceChildren();
+
+        $('course').value = '';
+
+        add('项目一', 30, 0);
+        add('项目二', 30, 0);
+        add('项目三', 40, 0);
+    };
+
+    // 监听目标成绩变化
+    $('target').oninput = calc;
+
+    // 监听待计算项目变化
+    $('pick').onchange = calc;
+
+    // 导出 CSV 文件
+    $('export').onclick = () => {
+        const {a, t, ok, need} = calc();
+
+        if (!ok) {
+            return;
+        }
+
+        // 处理 CSV 特殊字符
+        const esc = v =>
+            '"' +
+            String(v).replaceAll('"', '""') +
+            '"';
+
+        // 整理导出数据
+        const lines = [
+            ['课程', $('course').value],
+
+            ['项目', '占比(%)', '成绩', '折算分'],
+
+            ...a.map(x => [
+                x.n,
+                x.w,
+                x.s,
+                (x.w * x.s / 100).toFixed(2)
+            ]),
+
+            ['预计总评', t.toFixed(2)],
+
+            ['目标总评', $('target').value],
+
+            [
+                '反推项目',
+                $('pick').selectedOptions[0]?.text || ''
+            ],
+
+            [
+                '最低所需成绩',
+
+                need === null
+
+                    ? ''
+
+                    : Math.max(
+                        0,
+                        Math.ceil(need * 100 - 1e-8)
+                        / 100
+                    ).toFixed(2)
+            ]
+        ];
+
+        // 创建 CSV 文件
+        const blob = new Blob(
+            [
+                '\ufeff' +
+                lines.map(
+                    r => r.map(esc).join(',')
+                ).join('\r\n')
+            ],
+            {
+                type: 'text/csv;charset=utf-8'
+            }
+        );
+
+        const u = URL.createObjectURL(blob);
+
+        // 下载文件
+        const link = document.createElement('a');
+
+        link.href = u;
+        link.download = '成绩记录.csv';
+
+        link.click();
+
+        setTimeout(() => {
+            URL.revokeObjectURL(u);
+        }, 1000);
+    };
+
+    // 初始化默认课程数据
+    add('线下平时', 20, 90);
+    add('学习通', 30, 76.46);
+    add('期末考试', 50, 90);
+
+    $('pick').value = '3';
+
+    calc();
+</script>
+
+</body>
+</html>
